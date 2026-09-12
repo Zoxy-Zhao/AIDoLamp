@@ -2,6 +2,15 @@
 
 围绕“视觉感知—智能决策—机械执行”组织智能台灯项目，包含**六轴机械臂解析 IK 与关节轨迹算法演示**，以及树莓派 5 + STM32 多模态交互原型。
 
+## 台灯实物
+
+| 正面：灯罩、摄像头与底座 | 侧面：机械臂与控制板 |
+|:---:|:---:|
+| ![AIDoLamp 智能台灯正面实物照片](media/front-view.jpg) | ![AIDoLamp 智能台灯侧面实物照片](media/side-view.jpg) |
+
+照片展示四关节交互实物；六轴运动算法演示入口见下文。作品演示视频可联系作者提供。
+
+
 **项目硬件状态**：已接入硬件（作者确认）。本仓库同时提供可独立运行的算法演示；演示程序的离线运行方式与本次数值测试范围，不代表整个项目的硬件接入状态。
 
 **六轴解析 IK · 多解选解 · 人脸降维求解 · 书本照射姿态 · 关节限位 · 五次多项式轨迹 · 双摄视觉感知**
@@ -36,22 +45,9 @@ python -m unittest discover -s tests -v
 
 ## 多模态交互实物原型
 
-<p align="center">
-  <img src="media/side-view.jpg" width="380" alt="AIDoLamp 侧视图"/>
-  <img src="media/front-view.jpg" width="380" alt="AIDoLamp 正视图"/>
-</p>
-
 基于 **树莓派5 + STM32F407ZGT6** 的多模态交互智能台灯，围绕“视觉感知—模式决策—机械执行”组织目标检测、几何法逆运动学、关节空间插值与串口控制，结合 MediaPipe 手势/坐姿识别和 DeepSeek 语音交互，提供待机、普通、互动、写作四种工作模式。
 
 该实物版本采用底座、肩、肘、腕四个关节；实现入口与版本边界见[四轴原型实现说明](docs/motion-control.md)。
-
-## 实物展示
-
-<p align="center">
-  <img src="media/front-view.jpg" width="600" alt="AIDoLamp 实物"/>
-  <br/>
-  <sub>需要观看作品演示视频，可联系作者提供。</sub>
-</p>
 
 ## 技术栈
 
