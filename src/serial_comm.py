@@ -2,7 +2,10 @@ import serial
 import threading
 import time
 import os
-from voice_class import VoiceAssistant
+try:
+    from .motion4dof import Arm4, trajectory, arm_command, gripper_command
+except ImportError:
+    from motion4dof import Arm4, trajectory, arm_command, gripper_command
 
 
 class SerialCommunicator:
@@ -14,14 +17,18 @@ class SerialCommunicator:
         self.last_distance = None
         self.base_distance = None
         self.lock = threading.Lock()
+        self.tx_lock = threading.Lock()
+        self.motion_lock = threading.Lock()
+        self.faulted = False
+        self.gripper_angle = None  # Command estimate, not sensor feedback.
         self.mode_change_callback = None  # 模式切换回调函数
 
         # 定义各舵机的角度范围 [最小值, 最大值, 硬件中值]
         self.servo_ranges = [
-            [-135, 135, 90],  # 舵机1: -135~135度，中值0°对应硬件值90
+            [-135, 135, 135],  # 底座逻辑零位对应 PCA9685 135°
             [-90, 90, 90],  # 舵机2: -90~90度，中值0°对应硬件值90
-            [0, 150, 30],  # 舵机3: 0~150度，中值75°对应硬件值30（需校准）
-            [-90, 40, 65],  # 舵机4: 0~130度，中值65°对应硬件值65
+            [0, 150, 0],  # 肘关节逻辑零位对应 PCA9685 0°
+            [-90, 40, 90],  # 腕关节逻辑零位对应 PCA9685 90°
         ]
 
         # 当前舵机位置
@@ -34,6 +41,7 @@ class SerialCommunicator:
             "DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY", ""),
             "WEATHER_API_KEY": os.environ.get("WEATHER_API_KEY", ""),
         }
+        from voice_class import VoiceAssistant
         self.voice1 = VoiceAssistant(voice_config)  # 语音助手
 
         # 串口初始化
@@ -107,7 +115,7 @@ class SerialCommunicator:
     def stop_mode_one(self):
         """停止模式一"""
         self.running = False
-        if self.receive_thread:
+        if self.receive_thread and self.receive_thread is not threading.current_thread():
             self.receive_thread.join(timeout=1)
         print("==== 模式一已停止 ====")
 
@@ -148,16 +156,26 @@ class SerialCommunicator:
 
     # ---------------------- 核心通信方法 ----------------------
     def send_command(self, command: str):
-        """通用指令发送方法（重大修改）"""
-        if not command.endswith("\n"):
-            command += "\n"
+        """Serialize writes; a short/failed write latches a fault and aborts motion."""
+        with self.tx_lock:
+            if self.faulted:
+                raise RuntimeError('Serial fault latched; reconnect and synchronize state')
+            data=(command.rstrip('\r\n')+'\n').encode('ascii')
+            try:
+                if self.ser is None or self.ser.write(data) != len(data):
+                    raise IOError('Serial short write or missing port')
+            except Exception as exc:
+                self.faulted=True
+                self.stop()
+                raise RuntimeError('UART write failed; motion aborted') from exc
+        return True
 
-        try:
-            self.ser.write(command.encode("utf-8"))
-            print(f"[TX] 发送指令: {command.strip()}")
-        except Exception as e:
-            print(f"[TX Error] {str(e)}")
-            self.stop()
+    def send_gripper(self, angle):
+        """Independent actuator channel 4; never included in four-joint FK/IK."""
+        command=gripper_command(angle)
+        with self.motion_lock:
+            self.send_command(command)
+            self.gripper_angle=int(round(angle))
 
     # ====================== 模式命令 ======================
     def send_mode(self, mode_num: int):
@@ -168,41 +186,15 @@ class SerialCommunicator:
 
     # ====================== 舵机命令 ======================
     def send_servos_smooth(self, target_angles, duration=3.0, steps=30):
-        if len(target_angles) != 4:
-            raise ValueError("需要4个舵机角度参数")
-
-        # 验证各舵机角度是否在其有效范围内
-        for i, angle in enumerate(target_angles):
-            min_angle, max_angle, _ = self.servo_ranges[i]
-            if not min_angle <= angle <= max_angle:
-                raise ValueError(
-                    f"舵机{i + 1}角度需在{min_angle}到{max_angle}范围内，当前值:{angle}"
-                )
-
-        # 记录开始角度（使用当前角度）
-        start_angles = list(self.current_angles)
-
-        step_delay = duration / steps
-
-        # 平滑移动插值
-        for step in range(1, steps + 1):
-            # 计算当前步的角度(线性插值)
-            interpolated_angles = []
-            for i in range(4):
-                start = start_angles[i]
-                target = target_angles[i]
-                current = start + (target - start) * step / steps
-                interpolated_angles.append(int(current))
-
-            # 直接发送指令，不做额外的角度映射转换
-            cmd = f"Alldro {' '.join(map(str, interpolated_angles))}"
-            self.send_command(cmd)
-
-            # 更新当前位置
-            self.current_angles = interpolated_angles.copy()
-
-            # 等待指定时间
-            time.sleep(step_delay)
+        with self.motion_lock:
+            times, joints=trajectory(Arm4(),self.current_angles,target_angles,duration,steps)
+            commands=[arm_command(q) for q in joints[1:]]  # Preflight before any write.
+            start=time.monotonic()
+            for when,command in zip(times[1:],commands):
+                time.sleep(max(0.,start+float(when)-time.monotonic()))
+                self.send_command(command)
+                self.current_angles=[int(v) for v in command.split()[1:]]
+        return True
 
     def send_servo_action(self, action_type: str, *args):
         valid_actions = [

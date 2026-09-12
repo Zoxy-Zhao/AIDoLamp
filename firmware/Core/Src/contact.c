@@ -1,4 +1,10 @@
 #include "contact.h"
+#include "lamp_motion.h"
+
+static void lamp_emit(unsigned channel, float angle) {
+    if (channel == 0) PCA_Servo_270(0, angle);
+    else PCA_Servo_180((uint8_t)channel, angle);
+}
 
 
 
@@ -15,6 +21,12 @@ extern char receiveData[50];
 
 void contact()
 {
+    int motion = lamp_motion(receiveData, lamp_emit);
+    if (motion != 0) {
+        /* Invalid/missing/extra parameters never reach a PWM call. */
+        memset(receiveData, 0, sizeof(receiveData));
+        return;
+    }
 
 
 //	printf("命令词: %s\n", res.command);  // 输出：set_speed
@@ -125,16 +137,6 @@ void contact()
 	if(strcmp(res.command,STRING_Adroright) == 0)// 右
 	{
 		PCA_Servo_270(0,now_angle_0-10);
-	}
-
-	if(strcmp(res.command,STRING_Alldro) == 0)// 机械臂移动
-	{
-
-		PCA_Servo_270(0,res.params[0]);
-		PCA_Servo_180(1,res.params[1]);
-		PCA_Servo_180(2,res.params[2]);
-		PCA_Servo_180(3,res.params[3]);
-
 	}
 
 	//灯强

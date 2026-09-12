@@ -43,6 +43,7 @@ Thumbs.db
 
 # Linter cache
 .ruff_cache/
+/output/
 
 # Training data - sensitive (face/hand photos)
 training/gesture/**/data/raw/
